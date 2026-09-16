@@ -1,0 +1,109 @@
+@import 'tailwindcss';
+@import '../tokens/tokens.css';
+
+/* Dark mode is the primary, MVP-required surface — design-system.md's
+   Design Principles. tokens/tokens.css's :root already holds dark values,
+   with [data-theme="light"] overrides for the Should-Have light mode. */
+:root {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font: var(--font-body);
+}
+
+/* Smooth in-page anchor scrolling (the marketing header's "How it works" /
+   "Features" / "FAQ" links) — see design-system.md's Motion section:
+   functional, not decorative, and must respect prefers-reduced-motion,
+   which browsers do not do automatically for scroll-behavior. Previewed
+   and approved before this was applied — see the scroll-preview artifact. */
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* BrandMark (components/ui/BrandMark.tsx) renders both logo variants and
+   lets CSS pick the right one — the component itself has no theme value to
+   branch on since theme here is CSS-only (data-theme is set client-side by
+   ThemeToggle), same reasoning as SeverityBadge's fill-color choice. */
+.brand-mark-dark {
+  display: block;
+}
+.brand-mark-light {
+  display: none;
+}
+:root[data-theme='light'] .brand-mark-dark {
+  display: none;
+}
+:root[data-theme='light'] .brand-mark-light {
+  display: block;
+}
+
+/* Custom range-input thumb for ScenarioSimulator's reduction slider — a
+   browser pseudo-element (::-webkit-slider-thumb / ::-moz-range-thumb) has
+   no Tailwind utility, so it's hand-written here rather than approximated
+   with an arbitrary-value class. The track itself is still styled inline
+   per-instance (see ScenarioSimulator.tsx) since its fill position is a
+   dynamic percentage, not a static value this stylesheet could express. */
+.range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: var(--spacing-1);
+  border-radius: var(--radius-full);
+  outline: none;
+}
+.range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--spacing-4);
+  height: var(--spacing-4);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-elevated);
+  border: 3px solid var(--color-brand-solid);
+  box-shadow: 0 1px 3px var(--color-overlay);
+  cursor: pointer;
+}
+.range-slider::-moz-range-thumb {
+  width: var(--spacing-4);
+  height: var(--spacing-4);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-elevated);
+  border: 3px solid var(--color-brand-solid);
+  box-shadow: 0 1px 3px var(--color-overlay);
+  cursor: pointer;
+}
+.range-slider::-moz-range-track {
+  background: transparent;
+}
+
+/* Accordion expand/collapse — Radix sets --radix-accordion-content-height
+   on the content element itself; Tailwind has no first-class utility for a
+   custom keyframe referencing another library's runtime CSS variable, so
+   it's defined here rather than approximated with an arbitrary-value
+   class. See components/ui/Accordion.tsx. */
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}

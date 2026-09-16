@@ -1,0 +1,21 @@
+order_id,customer_name,customer_email,order_status,order_total,order_date,expected_delivery_date,supplier_name,delivery_status,carrier,dispatched_at,delivered_at,complaint_category,complaint_severity,complaint_description
+ORD-1001,Alice Nguyen,alice@example.com,Delivered,89.99,2026-07-01,2026-07-05,Acme Textiles,delivered,FastShip,2026-07-02,2026-07-05,,,
+ORD-1002,Ben Carter,ben@example.com,Delivered,45.50,2026-07-01,2026-07-04,Northwind Supply,delivered,FastShip,2026-07-01,2026-07-04,,,
+ORD-1003,Carla Diaz,carla@example.com,Delivered,120.00,2026-07-02,2026-07-06,Northwind Supply,delivered,QuickCourier,2026-07-02,2026-07-05,,,
+ORD-1004,David Kim,david@example.com,Delivered,60.25,2026-07-02,2026-07-06,Acme Textiles,delayed,FastShip,2026-07-06,2026-07-12,Delivery,High,Order arrived a week late with no notice.
+ORD-1005,Elena Petrova,elena@example.com,Delivered,75.00,2026-07-03,2026-07-07,Acme Textiles,delayed,FastShip,2026-07-07,2026-07-13,Delivery,High,"Very late delivery, missed an event."
+ORD-1006,Farid Hassan,farid@example.com,Delivered,32.10,2026-07-03,2026-07-07,Northwind Supply,delivered,QuickCourier,2026-07-03,2026-07-06,,,
+ORD-1007,Grace Lee,grace@example.com,Delivered,150.00,2026-07-04,2026-07-08,Acme Textiles,delayed,FastShip,2026-07-08,2026-07-14,Delivery,Medium,Delivery delayed almost a week past the estimate.
+ORD-1008,Hassan Ali,hassan@example.com,Delivered,42.00,2026-07-04,2026-07-08,Northwind Supply,delivered,QuickCourier,2026-07-04,2026-07-07,,,
+ORD-1009,Ines Moreau,ines@example.com,Delivered,95.75,2026-07-05,2026-07-09,Acme Textiles,delayed,FastShip,2026-07-09,2026-07-15,Delivery,High,Package took two extra weeks.
+ORD-1010,Jack Thompson,jack@example.com,Delivered,58.00,2026-07-05,2026-07-09,Northwind Supply,delivered,QuickCourier,2026-07-05,2026-07-08,,,
+ORD-1011,Karen White,karen@example.com,Delivered,110.00,2026-07-06,2026-07-10,Acme Textiles,delayed,FastShip,2026-07-10,2026-07-16,Delivery,Medium,Shipment was delayed with no tracking updates.
+ORD-1012,Liam Brown,liam@example.com,Delivered,29.99,2026-07-06,2026-07-10,Northwind Supply,delivered,QuickCourier,2026-07-06,2026-07-09,,,
+ORD-1013,Maria Garcia,maria@example.com,Delivered,67.50,2026-07-07,2026-07-11,Acme Textiles,delayed,FastShip,2026-07-11,2026-07-17,Delivery,High,"Extremely late, considering canceling future orders."
+ORD-1014,Noah Wilson,noah@example.com,Delivered,80.00,2026-07-07,2026-07-11,Northwind Supply,delivered,QuickCourier,2026-07-07,2026-07-10,,,
+ORD-1015,Olivia Martin,olivia@example.com,Delivered,54.20,2026-07-08,2026-07-12,Northwind Supply,delivered,QuickCourier,2026-07-08,2026-07-11,,,
+ORD-1016,Paul Anderson,paul@example.com,Delivered,73.00,2026-07-08,2026-07-12,Acme Textiles,delivered,FastShip,2026-07-09,2026-07-12,,,
+ORD-1017,Quinn Robinson,quinn@example.com,Delivered,99.00,2026-07-09,2026-07-13,Northwind Supply,delivered,QuickCourier,2026-07-09,2026-07-12,,,
+ORD-1018,Rosa Sanchez,rosa@example.com,Delivered,41.30,2026-07-09,2026-07-13,Acme Textiles,delivered,FastShip,2026-07-10,2026-07-13,,,
+ORD-1019,Samuel Clark,samuel@example.com,Delivered,88.40,2026-07-10,2026-07-14,Northwind Supply,delivered,QuickCourier,2026-07-10,2026-07-13,,,
+ORD-1020,Tara Lewis,tara@example.com,Delivered,63.60,2026-07-10,2026-07-14,Acme Textiles,delivered,FastShip,2026-07-11,2026-07-14,,,

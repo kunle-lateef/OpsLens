@@ -1,0 +1,880 @@
+// Prisma schema — a faithful implementation of the logical data model in
+// .agents/skills/db-migration-runner/SKILL.md. Do not add, rename, or
+// retype a field without updating that file first — it is the source of
+// truth, not this file. See that file's "Before You Touch the Schema" and
+// "Special Rules for This Schema" sections before editing.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Supabase's pooled connection (DATABASE_URL, PgBouncer transaction mode)
+  // doesn't support the prepared statements `prisma migrate` needs — this
+  // is Prisma's own documented workaround, a direct, unpooled connection
+  // used only by the CLI for migrations. Not a concern with Neon (the
+  // developer decision recorded in security.md's Secrets and Configuration
+  // section), which is why this wasn't here before; safe to leave
+  // DIRECT_URL equal to DATABASE_URL for any provider that doesn't need
+  // the split.
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums — fixed vocabulary per db-migration-runner/SKILL.md and code-style.md.
+// Fields marked "not yet defined as a fixed enum" in that file are modeled
+// below as String, not guessed into an enum — see the field-level comments.
+// ---------------------------------------------------------------------------
+
+enum PlanTier {
+  Free
+  Paid
+}
+
+enum RoleName {
+  Owner
+  Admin
+  Manager
+  Analyst
+  Viewer
+}
+
+enum DataSourceType {
+  CSV
+  SPREADSHEET
+  CRM
+  INVENTORY
+  FINANCE
+  LOGISTICS
+  SUPPORT
+  API
+}
+
+enum ConfidenceLevel {
+  High
+  Medium
+  Low
+  InsufficientEvidence
+}
+
+enum IssueSeverity {
+  Critical
+  High
+  Medium
+  Low
+}
+
+enum NotificationSeverity {
+  Critical
+  High
+  Medium
+  Informational
+}
+
+enum IssueStatus {
+  Detected
+  Reviewed
+  Acknowledged
+  InProgress
+  Resolved
+  Dismissed
+}
+
+enum RecommendationStatus {
+  Pending
+  Accepted
+  Rejected
+  Modified
+  Dismissed
+  Completed
+}
+
+enum FeedbackType {
+  Helpful
+  NotHelpful
+  Incorrect
+  MissingContext
+}
+
+enum NotificationChannel {
+  InApp
+  Email
+  SMS
+  Push
+}
+
+// ---------------------------------------------------------------------------
+// Core / tenancy
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id                          String   @id @default(cuid())
+  name                        String
+  slug                        String   @unique
+  industry                    String?
+  timezone                    String
+  healthScore                 Float?
+  healthScoreAlgorithmVersion Int?
+  planTier                    PlanTier @default(Free)
+  usageQuota                  Int
+  usageCount                  Int      @default(0)
+  billingCycleStart           DateTime
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  users                 User[]
+  roles                 Role[]
+  dataSources           DataSource[]
+  dataImports           DataImport[]
+  customers             Customer[]
+  products              Product[]
+  warehouses            Warehouse[]
+  suppliers             Supplier[]
+  orders                Order[]
+  inventoryItems        InventoryItem[]
+  deliveries            Delivery[]
+  invoices              Invoice[]
+  payments              Payment[]
+  complaints            Complaint[]
+  events                OperationalEvent[]
+  metrics               Metric[]
+  insights              Insight[]
+  issues                Issue[]
+  recommendations       Recommendation[]
+  aiInteractions        AIInteraction[]
+  feedback              Feedback[]
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+  reports               Report[]
+  healthScoreSnapshots  HealthScoreSnapshot[]
+  morningBriefSnapshots MorningBriefSnapshot[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  email          String   @unique
+  avatarUrl      String?
+  passwordHash   String // added during Foundation implementation — see db-migration-runner's
+  // User model note; confirm with developer if OAuth/passwordless was intended
+  roleId         String
+  status         String // not yet a fixed enum — confirm with developer (db-migration-runner)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role                Role                 @relation(fields: [roleId], references: [id])
+  assignedIssues      Issue[]              @relation("IssueAssignee")
+  aiInteractions      AIInteraction[]
+  feedback            Feedback[]
+  auditLogs           AuditLog[]
+  reports             Report[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+// Added post-launch, not in the original entity list — see
+// db-migration-runner/SKILL.md's PasswordResetToken section. Scoped by
+// userId only (no organizationId): a reset token is never looked up or
+// listed across users, so there's no tenant-isolation query that needs the
+// column, and the FK to User already prevents it from ever pointing at
+// another organization's account.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique // sha256 of the raw token — see lib/password-reset.ts for why this differs from lib/password.ts's scrypt choice
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Role {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           RoleName
+  permissions    Json // granular permission flags — extensible without a schema change
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users        User[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("roles")
+}
+
+// ---------------------------------------------------------------------------
+// Data ingestion
+// ---------------------------------------------------------------------------
+
+model DataSource {
+  id             String         @id @default(cuid())
+  organizationId String
+  name           String
+  type           DataSourceType // long-term domain vocabulary — only CSV (and SPREADSHEET, if built)
+  // is reachable through the product for MVP; see AGENTS.md's Non-Negotiables
+  status         String
+  configuration  Json?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dataImports  DataImport[]
+
+  // Added during Phase 2 implementation so a "CSV Uploads" DataSource can be
+  // find-or-created per organization without a dedicated management UI yet.
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("data_sources")
+}
+
+model DataImport {
+  id              String    @id @default(cuid())
+  organizationId  String
+  dataSourceId    String
+  fileName        String
+  fileUrl         String // added during Phase 2 implementation — see db-migration-runner's
+  // DataImport model note; steps are stateless so content must be
+  // re-fetchable, not passed in memory between them
+  checksum        String // dedupe/integrity — the pipeline's cost-reuse logic matches on this
+  status          String // not yet a fixed enum — confirm with developer; see db-migration-runner
+  // for a plausible starting set before locking a migration to it
+  recordsDetected Int?
+  recordsImported Int?
+  recordsRejected Int?
+  qualityScore    Float? // overall figure only — no per-dimension breakdown yet, see design-system.md
+  errorSummary    String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dataSource   DataSource    @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  mappings     DataMapping[]
+
+  @@index([organizationId])
+  @@index([dataSourceId])
+  @@index([checksum])
+  @@map("data_imports")
+}
+
+model DataMapping {
+  id              String   @id @default(cuid())
+  dataImportId    String
+  sourceField     String
+  targetEntity    String? // nullable — a column with no confident suggestion is left
+  // unmapped until the user picks a target, rather than
+  // forcing a guess into a non-nullable column
+  targetField     String?
+  confidence      Float?
+  confirmedByUser Boolean  @default(false) // AI-suggested mappings must never silently overwrite
+  // a user-confirmed mapping — see architecture.md's Data Flow
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  dataImport DataImport @relation(fields: [dataImportId], references: [id], onDelete: Cascade)
+
+  @@index([dataImportId])
+  @@map("data_mappings")
+}
+
+// ---------------------------------------------------------------------------
+// Operational domain entities
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id             String   @id @default(cuid())
+  organizationId String
+  externalId     String?
+  name           String
+  email          String?
+  phone          String?
+  location       String?
+  segment        String?
+  status         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  invoices     Invoice[]
+  complaints   Complaint[]
+
+  @@index([organizationId])
+  @@map("customers")
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  organizationId String
+  externalId     String?
+  name           String
+  sku            String?
+  category       String?
+  unitPrice      Decimal? @db.Decimal(12, 2)
+  status         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orderItems     OrderItem[]
+  inventoryItems InventoryItem[]
+
+  @@index([organizationId])
+  @@map("products")
+}
+
+model Warehouse {
+  id             String   @id @default(cuid())
+  organizationId String
+  externalId     String?
+  name           String
+  location       String?
+  capacity       Int?
+  status         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orders         Order[]
+  inventoryItems InventoryItem[]
+  deliveries     Delivery[]
+
+  @@index([organizationId])
+  @@map("warehouses")
+}
+
+model Supplier {
+  id             String   @id @default(cuid())
+  organizationId String
+  externalId     String?
+  name           String
+  location       String?
+  status         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  deliveries   Delivery[]
+
+  @@index([organizationId])
+  @@map("suppliers")
+}
+
+model Order {
+  id                 String    @id @default(cuid())
+  organizationId     String
+  externalId         String?
+  customerId         String
+  warehouseId        String?
+  supplierId         String?
+  status             String // not yet a fixed enum — confirm with developer
+  totalAmount        Decimal?  @db.Decimal(12, 2)
+  currency           String? // no automatic FX conversion — always display alongside the figure;
+  // not yet confirmed elsewhere in the doc set, see db-migration-runner
+  orderedAt          DateTime?
+  expectedDeliveryAt DateTime?
+  deliveredAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId], references: [id])
+  warehouse    Warehouse?   @relation(fields: [warehouseId], references: [id])
+  supplier     Supplier?    @relation(fields: [supplierId], references: [id])
+  items        OrderItem[]
+  deliveries   Delivery[]
+  complaints   Complaint[]
+
+  // Added during Phase 2 implementation so re-imports can update an
+  // existing Order by its externalId (upsert) rather than always creating
+  // a duplicate — externalId is nullable, and Postgres treats multiple
+  // NULLs as non-conflicting, so orders without one are unaffected.
+  @@unique([organizationId, externalId])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([warehouseId])
+  @@index([supplierId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Decimal? @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model InventoryItem {
+  id               String   @id @default(cuid())
+  organizationId   String
+  productId        String
+  warehouseId      String
+  quantity         Int
+  reorderThreshold Int?
+  reservedQuantity Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
+  warehouse    Warehouse    @relation(fields: [warehouseId], references: [id])
+
+  @@unique([productId, warehouseId])
+  @@index([organizationId])
+  @@map("inventory_items")
+}
+
+model Delivery {
+  id             String    @id @default(cuid())
+  organizationId String
+  orderId        String
+  warehouseId    String?
+  supplierId     String?
+  status         String // not yet a fixed enum — confirm with developer
+  carrier        String?
+  dispatchedAt   DateTime?
+  expectedAt     DateTime?
+  deliveredAt    DateTime?
+  failureReason  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse?   @relation(fields: [warehouseId], references: [id])
+  supplier     Supplier?    @relation(fields: [supplierId], references: [id])
+
+  @@index([organizationId])
+  @@index([orderId])
+  @@index([warehouseId])
+  @@index([supplierId])
+  // Composite, added during the Phase 7 performance pass: the logistics
+  // department view and lib/health-score.ts both filter on exactly this
+  // (organizationId, createdAt range) shape — see app/(dashboard)/
+  // departments/logistics/page.tsx and lib/health-score.ts's
+  // getHealthScoreInputs. The single-column organizationId index above
+  // still serves other queries; this one targets the recurring range scan.
+  @@index([organizationId, createdAt])
+  @@map("deliveries")
+}
+
+model Invoice {
+  id             String    @id @default(cuid())
+  organizationId String
+  customerId     String
+  externalId     String?
+  amount         Decimal   @db.Decimal(12, 2)
+  currency       String?
+  issuedAt       DateTime?
+  dueAt          DateTime?
+  paidAt         DateTime?
+  status         String // not yet a fixed enum — confirm with developer
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId], references: [id])
+  payments     Payment[]
+
+  @@index([organizationId])
+  @@index([customerId])
+  // Composite, added during the Phase 7 performance pass: the finance
+  // department view filters overdue invoices by exactly this shape — see
+  // app/(dashboard)/departments/finance/page.tsx.
+  @@index([organizationId, status])
+  @@map("invoices")
+}
+
+model Payment {
+  id             String    @id @default(cuid())
+  organizationId String
+  invoiceId      String
+  amount         Decimal   @db.Decimal(12, 2)
+  currency       String?
+  paidAt         DateTime?
+  method         String?
+  status         String?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoice      Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model Complaint {
+  id             String    @id @default(cuid())
+  organizationId String
+  customerId     String
+  orderId        String?
+  category       String?
+  severity       String?
+  description    String?
+  status         String?
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId], references: [id])
+  order        Order?       @relation(fields: [orderId], references: [id])
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([orderId])
+  // Composite, added during the Phase 7 performance pass: the customer
+  // department view's complaint list and category groupBy both filter on
+  // exactly this shape — see app/(dashboard)/departments/customer/page.tsx.
+  @@index([organizationId, createdAt])
+  @@map("complaints")
+}
+
+// ---------------------------------------------------------------------------
+// Operational intelligence — the central pipeline
+// ---------------------------------------------------------------------------
+
+/// Append-only once created. A migration that adds an UPDATE or DELETE path
+/// to existing rows (outside the corrected-reimport flow in architecture.md's
+/// Data Flow section, which creates a *new* event rather than mutating one)
+/// is almost certainly wrong — stop and ask before writing it.
+model OperationalEvent {
+  id             String   @id @default(cuid())
+  organizationId String
+  type           String // open, extensible vocabulary (DELIVERY_DELAYED, INVENTORY_LOW, ...) —
+  // validated by a Zod enum in lib/types.ts, not a hard DB enum
+  entityType     String
+  entityId       String
+  timestamp      DateTime
+  severity       String?
+  value          Float?
+  groupKey       String? // 'order:<id>' or 'customer:<id>' — added post-launch, not in the
+  // original sketch. A real, shared foreign key computed once at event-
+  // creation time (see lib/data-import/normalize.ts), never inferred later
+  // from time proximity — Timeline's chain view groups strictly on this
+  // field. Null on events created before this field existed; those render
+  // as ungrouped singletons rather than being retroactively (and
+  // unreliably) grouped.
+  metadata       Json?
+  sourceId       String? // which DataImport or DataSource produced this event
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([type])
+  @@index([entityType, entityId])
+  // Composite, added during the Phase 7 performance pass: lib/health-
+  // score.ts's getHealthScoreInputs and app/(dashboard)/departments/
+  // logistics/page.tsx both filter on exactly (organizationId, type,
+  // timestamp range) — this is the query the two single-column indexes
+  // above were each only partially serving.
+  @@index([organizationId, type, timestamp])
+  @@map("operational_events")
+}
+
+model Metric {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  key            String
+  value          Float
+  unit           String?
+  periodStart    DateTime
+  periodEnd      DateTime
+  source         String?
+  metadata       Json?
+  calculatedAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([key])
+  @@map("metrics")
+}
+
+model Insight {
+  id                 String          @id @default(cuid())
+  organizationId     String
+  type               String
+  title              String
+  summary            String
+  severity           IssueSeverity // uses IssueSeverity's value set for consistency, even though
+  // an Insight isn't itself an Issue
+  confidence         ConfidenceLevel // required at creation, never nullable — see AGENTS.md's
+  // Non-Negotiables and security.md's AI Output & Structured Data Trust
+  impactScore        Float?
+  detectedAt         DateTime        @default(now())
+  validFrom          DateTime?
+  validTo            DateTime?
+  status             String?
+  rootCauseNarrative String? // added during Phase 3 implementation — see db-migration-runner's
+  // Insight model note; only populated once confidence clears the bar
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  evidence     Evidence[]
+  issues       Issue[]
+
+  @@index([organizationId])
+  @@map("insights")
+}
+
+/// Required at creation for every Insight — there is no code path that
+/// creates an Insight without at least one Evidence row.
+model Evidence {
+  id              String   @id @default(cuid())
+  insightId       String
+  sourceType      String
+  sourceId        String?
+  description     String
+  metricValue     Float?
+  comparisonValue Float?
+  period          String?
+  relevanceScore  Float?
+  createdAt       DateTime @default(now())
+
+  insight Insight @relation(fields: [insightId], references: [id], onDelete: Cascade)
+
+  @@index([insightId])
+  @@map("evidence")
+}
+
+/// Issue.insightId is a single FK for now. architecture.md's AI Processing
+/// section describes an Issue as potentially synthesizing more than one
+/// Insight — a genuine, unresolved tension with this file. Do not silently
+/// pick a many-to-many shape; ask the developer before the first migration
+/// that would need one. Deliberately has no `confidence` column — an Issue
+/// inherits/recomputes confidence from the Insight(s) behind it rather than
+/// storing its own (see AGENTS.md's Non-Negotiables).
+model Issue {
+  id                       String        @id @default(cuid())
+  organizationId           String
+  insightId                String
+  title                    String
+  description              String?
+  severity                 IssueSeverity
+  priorityScore            Float?
+  priorityAlgorithmVersion Int?
+  status                   IssueStatus   @default(Detected)
+  assigneeId               String?
+  impactAmount             Decimal?      @db.Decimal(12, 2)
+  impactCurrency           String?
+  detectedAt               DateTime      @default(now())
+  acknowledgedAt           DateTime?
+  resolvedAt               DateTime?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  insight         Insight          @relation(fields: [insightId], references: [id])
+  assignee        User?            @relation("IssueAssignee", fields: [assigneeId], references: [id])
+  recommendations Recommendation[]
+
+  @@index([organizationId])
+  @@index([insightId])
+  @@index([assigneeId])
+  @@map("issues")
+}
+
+/// A human decision on a Recommendation (the transition out of Pending) is a
+/// first-class audit record. Never delete a Recommendation row or overwrite
+/// its status in the normal application flow once it has left Pending.
+model Recommendation {
+  id             String               @id @default(cuid())
+  organizationId String
+  issueId        String
+  title          String
+  description    String?
+  expectedImpact String?
+  confidence     ConfidenceLevel
+  rationale      String?
+  status         RecommendationStatus @default(Pending)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  issue        Issue        @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([issueId])
+  @@map("recommendations")
+}
+
+// ---------------------------------------------------------------------------
+// AI Assistant, feedback, notifications, audit
+// ---------------------------------------------------------------------------
+
+model AIInteraction {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  sessionId      String?
+  question       String
+  answer         String
+  model          String?
+  context        Json? // do not store unnecessary sensitive information — see security.md's Logging rules
+  sources        Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("ai_interactions")
+}
+
+model Feedback {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  targetType     String // which entity this feedback is about: Insight | Issue | Recommendation | AIInteraction
+  targetId       String
+  type           FeedbackType
+  comment        String?
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([targetType, targetId])
+  @@map("feedback")
+}
+
+model Notification {
+  id             String               @id @default(cuid())
+  organizationId String
+  eventId        String?
+  severity       NotificationSeverity
+  channel        NotificationChannel // SMS/Push are Should-Have, gated by a feature flag rather
+  // than absent from the schema
+  message        String // Added post-launch, not in the original sketch — the
+  // notification's own display text; nothing else on this row was
+  // self-descriptive enough to render a list item from.
+  linkUrl        String? // where clicking the notification should navigate — added alongside message
+  status         String // Implemented using the plausible default set this row used to flag as
+  // unconfirmed: "Pending | Sent | Failed | Read". Only InApp notifications
+  // are actually created today (see lib/notifications.ts), so in practice
+  // this is just Sent -> Read; Pending/Failed are reserved for the
+  // Email/SMS/Push channels once those are built.
+  createdAt      DateTime             @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("notifications")
+}
+
+/// Important user actions involving Recommendation decisions, Issue status
+/// changes, permission changes, and data imports must produce a row here.
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entityType     String
+  entityId       String
+  previousValue  Json?
+  newValue       Json?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+enum ReportType {
+  Weekly
+}
+
+/// Added during Phase 6 implementation — see db-migration-runner/SKILL.md's
+/// Report model note. `content` is structured Json (biggestWins,
+/// biggestRisks, anomalies, predictedRisks, recommendedPriorities), not a
+/// flat text blob, so the UI can render each section distinctly.
+model Report {
+  id             String     @id @default(cuid())
+  organizationId String
+  type           ReportType @default(Weekly)
+  periodStart    DateTime
+  periodEnd      DateTime
+  content        Json
+  userId         String? // who manually triggered this, if not scheduled — no scheduling
+  // mechanism decided yet, see db-migration-runner's Report model note
+  createdAt      DateTime   @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@map("reports")
+}
+
+/// Added post-launch, not in the original entity list — see
+/// db-migration-runner/SKILL.md's HealthScoreSnapshot note. One row per
+/// organization per calendar day (updated in place, not inserted again, if
+/// the score is recomputed more than once the same day — recomputeHealthScore
+/// runs on every Morning Brief page view, not just on data changes, so
+/// without that bucketing this table would grow one row per page view
+/// instead of one per day). Feeds the Health Score trend sparkline; nothing
+/// else reads from it.
+model HealthScoreSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String
+  overall        Int?
+  capturedAt     DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, capturedAt])
+  @@map("health_score_snapshots")
+}
+
+/// Added post-launch, not in the original entity list — see
+/// db-migration-runner/SKILL.md's MorningBriefSnapshot note. Deliberately
+/// separate from Metric: Metric is read wholesale (unfiltered by key) by
+/// both detect-insights.ts and assistant-context.ts as real operational
+/// data fed to the AI — writing dashboard-cache rows into that table would
+/// leak trend-tracking artifacts into what the AI treats as grounded fact.
+model MorningBriefSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String // 'critical_issues' | 'overdue_invoices' | 'complaints_7d' — see lib/morning-brief-snapshots.ts
+  value          Int?
+  capturedAt     DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, key, capturedAt])
+  @@map("morning_brief_snapshots")
+}
