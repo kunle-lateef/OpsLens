@@ -10,7 +10,6 @@ import { NavSidebar } from '@/components/dashboard/NavSidebar';
 import { NotificationBell } from '@/components/dashboard/NotificationBell';
 import { ThemeToggle } from '@/components/dashboard/ThemeToggle';
 import { CommandPalette } from '@/components/dashboard/CommandPalette';
-import { BrandMark } from '@/components/ui/BrandMark';
 
 type DashboardShellProps = {
   organizationName: string;
@@ -94,7 +93,7 @@ export function DashboardShell({
         >
           <Menu size={20} aria-hidden="true" />
         </button>
-        <BrandMark size={18} className="mx-auto" />
+        <span aria-hidden="true" />
         <div className="flex items-center gap-(--space-1) justify-self-end">
           <NotificationBell
             notifications={notifications}
